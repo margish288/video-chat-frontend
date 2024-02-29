@@ -7,26 +7,78 @@ import peer from "../service/peer";
 const Room = () => {
   const [socketId, setSocketId] = useState(null);
   const [mySteam, setMyStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
   const navigate = useNavigate();
   const socket = useSocket();
+
   const handleUserJoined = useCallback(({ email, id }) => {
     console.log(`Email - ${email} joined the room.`);
     setSocketId(id);
   }, []);
 
-  const handleIncomingCall = useCallback(({ from, offer }) => {
-    console.log(`Incoming call from : ${from}`, offer);
+  const handleIncomingCall = useCallback(
+    async ({ from, offer }) => {
+      console.log(`Incoming call from : ${from}`, offer);
+
+      // setting remote socket id of the requested call user
+      setSocketId(from);
+
+      // turning on the user's stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: true,
+      });
+      setMyStream(stream);
+
+      const ans = await peer.getAnswer(offer);
+      socket.emit("call:accepted", { to: from, ans });
+    },
+    [socket]
+  );
+
+  const handleCallAccepted = useCallback(
+    ({ from, ans }) => {
+      peer.setLocalDescription(ans);
+      console.log("call accepted");
+
+      for (const track of mySteam.getTracks()) {
+        peer.peer.addTrack(track, mySteam);
+      }
+    },
+    [mySteam]
+  );
+
+  const negotiationneeded = useCallback(async () => {
+    const offer = await peer.getOffer();
+    socket.emit("peer:nego:needed", { to: socketId, offer });
+  }, [socket, socketId]);
+
+  useEffect(() => {
+    peer.peer.addEventListener("negotiationneeded", negotiationneeded);
+
+    return () => {
+      peer.peer.removeEventListener("negotiationneeded", negotiationneeded);
+    };
+  }, [negotiationneeded, socket, socketId]);
+
+  useEffect(() => {
+    peer.peer.addEventListener("track", async (ev) => {
+      const remoteStream = ev.streams;
+      setRemoteStream(remoteStream);
+    });
   }, []);
 
   useEffect(() => {
     socket.on("room:joined", handleUserJoined);
     socket.on("incoming:call", handleIncomingCall);
+    socket.on("call:accpeted", handleCallAccepted);
 
     return () => {
       socket.off("room:joined", handleUserJoined);
       socket.off("incoming:call", handleIncomingCall);
+      socket.off("call:accpeted", handleCallAccepted);
     };
-  }, [socket, handleUserJoined, handleIncomingCall]);
+  }, [socket, handleUserJoined, handleIncomingCall, handleCallAccepted]);
 
   const handleCallUser = useCallback(async () => {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -56,6 +108,18 @@ const Room = () => {
             width="100px"
             height="200px"
             url={mySteam}
+          />
+        </>
+      )}
+      {remoteStream && (
+        <>
+          <h4>Remote Stream</h4>
+          <ReactPlayer
+            muted
+            playing
+            width="100px"
+            height="200px"
+            url={remoteStream}
           />
         </>
       )}
