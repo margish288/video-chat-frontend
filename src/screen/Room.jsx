@@ -15,7 +15,7 @@ const Room = () => {
   }, []);
 
   const handleIncomingCall = useCallback(({ from, offer }) => {
-    console.log(`Incoming call from : ${from} ${offer}`);
+    console.log(`Incoming call from : ${from}`, offer);
   }, []);
 
   useEffect(() => {

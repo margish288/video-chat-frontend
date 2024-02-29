@@ -20,6 +20,7 @@ class PeerService {
       const offer = await this.peer.createOffer();
       console.log("Offer created ! ", offer);
       await this.peer.setLocalDescription(new RTCSessionDescription(offer));
+      return offer;
     }
   }
 }
