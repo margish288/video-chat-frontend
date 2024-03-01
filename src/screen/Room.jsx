@@ -11,11 +11,25 @@ const Room = () => {
   const navigate = useNavigate();
   const socket = useSocket();
 
+  // user joined the room
   const handleUserJoined = useCallback(({ email, id }) => {
     console.log(`Email - ${email} joined the room.`);
     setSocketId(id);
   }, []);
 
+  // calling the user
+  const handleCallUser = useCallback(async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: true,
+    });
+
+    const offer = await peer.getOffer();
+    socket.emit("user:call", { to: socketId, offer });
+    setMyStream(stream);
+  }, [socketId, socket]);
+
+  // incoming call
   const handleIncomingCall = useCallback(
     async ({ from, offer }) => {
       console.log(`Incoming call from : ${from}`, offer);
@@ -36,23 +50,69 @@ const Room = () => {
     [socket]
   );
 
+  // send stream to the user
+  const sendStream = useCallback(() => {
+    for (const track of mySteam.getTracks()) {
+      peer.peer.addTrack(track, mySteam);
+    }
+  }, [mySteam]);
+
+  // call accepted
   const handleCallAccepted = useCallback(
     ({ from, ans }) => {
       peer.setLocalDescription(ans);
       console.log("call accepted");
-
-      for (const track of mySteam.getTracks()) {
-        peer.peer.addTrack(track, mySteam);
-      }
+      sendStream();
     },
-    [mySteam]
+    [sendStream]
   );
 
+  // negotiation needed
   const negotiationneeded = useCallback(async () => {
     const offer = await peer.getOffer();
     socket.emit("peer:nego:needed", { to: socketId, offer });
   }, [socket, socketId]);
 
+  // negotiation incoming
+  const handleNegotiationIncoming = useCallback(
+    async ({ from, offer }) => {
+      console.log(`Negotiation needed from ${from}`);
+      const ans = await peer.getAnswer(offer);
+      socket.emit("peer:nego:done", { to: from, ans });
+    },
+    [socket]
+  );
+
+  // negotiation final
+  const handleNegotiationFinal = useCallback(async ({ ans }) => {
+    await peer.setLocalDescription(ans);
+  }, []);
+
+  // all the socket events
+  useEffect(() => {
+    socket.on("room:joined", handleUserJoined);
+    socket.on("incoming:call", handleIncomingCall);
+    socket.on("call:accpeted", handleCallAccepted);
+    socket.on("peer:nego:needed", handleNegotiationIncoming);
+    socket.on("peer:nego:final", handleNegotiationFinal);
+
+    return () => {
+      socket.off("room:joined", handleUserJoined);
+      socket.off("incoming:call", handleIncomingCall);
+      socket.off("call:accpeted", handleCallAccepted);
+      socket.off("peer:nego:needed", handleNegotiationIncoming);
+      socket.off("peer:nego:final", handleNegotiationFinal);
+    };
+  }, [
+    socket,
+    handleUserJoined,
+    handleIncomingCall,
+    handleCallAccepted,
+    handleNegotiationIncoming,
+    handleNegotiationFinal,
+  ]);
+
+  // adding negotiation needed
   useEffect(() => {
     peer.peer.addEventListener("negotiationneeded", negotiationneeded);
 
@@ -61,35 +121,13 @@ const Room = () => {
     };
   }, [negotiationneeded, socket, socketId]);
 
+  // adding tracks and setting the remote stream
   useEffect(() => {
     peer.peer.addEventListener("track", async (ev) => {
       const remoteStream = ev.streams;
-      setRemoteStream(remoteStream);
+      setRemoteStream(remoteStream[0]);
     });
   }, []);
-
-  useEffect(() => {
-    socket.on("room:joined", handleUserJoined);
-    socket.on("incoming:call", handleIncomingCall);
-    socket.on("call:accpeted", handleCallAccepted);
-
-    return () => {
-      socket.off("room:joined", handleUserJoined);
-      socket.off("incoming:call", handleIncomingCall);
-      socket.off("call:accpeted", handleCallAccepted);
-    };
-  }, [socket, handleUserJoined, handleIncomingCall, handleCallAccepted]);
-
-  const handleCallUser = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: true,
-    });
-
-    const offer = await peer.getOffer();
-    socket.emit("user:call", { to: socketId, offer });
-    setMyStream(stream);
-  }, [socketId, socket]);
 
   return (
     <div>
@@ -97,7 +135,9 @@ const Room = () => {
       <span>
         <button onClick={() => navigate("/")}>Home</button>
       </span>
+      {mySteam && <button onClick={sendStream}>Send stream</button>}
       <h3>{socketId ? "Connected" : "No one in the room"}</h3>
+
       {socketId && <button onClick={handleCallUser}>Call</button>}
       {mySteam && (
         <>
